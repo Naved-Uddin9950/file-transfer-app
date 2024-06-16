@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>File Transfer App</title>
     <link rel="stylesheet" href="./app.css">
 </head>
 
@@ -26,7 +26,7 @@
       let localConnection, remoteConnection, dataChannel;
   
       // Set up WebSocket for signaling
-      const socket = new WebSocket('ws://YOUR_SERVER_URL:8080');
+      const socket = new WebSocket('https://file-transfer-app-453x.onrender.com/:8080');
       socket.onmessage = event => {
         const message = JSON.parse(event.data);
         if (message.offer) {
