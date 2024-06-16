@@ -1,15 +1,30 @@
+const express = require('express');
+const path = require('path');
 const WebSocket = require('ws');
-const server = new WebSocket.Server({ port: 8080 });
 
-server.on('connection', socket => {
-  socket.on('message', message => {
-    // Broadcast the message to all clients
-    server.clients.forEach(client => {
-      if (client !== socket && client.readyState === WebSocket.OPEN) {
+const app = express();
+const port = process.env.PORT || 8080;
+
+// Serve static files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Start HTTP server
+const server = app.listen(port, () => {
+  console.log(`Server is listening on port ${port}`);
+});
+
+// Set up WebSocket server
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', function connection(ws) {
+  ws.on('message', function incoming(message) {
+    // Broadcast message to all clients
+    wss.clients.forEach(function each(client) {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
         client.send(message);
       }
     });
   });
 });
 
-console.log('WebSocket server is running on https://file-transfer-app-453x.onrender.com/:8080');
+console.log('WebSocket server is running');

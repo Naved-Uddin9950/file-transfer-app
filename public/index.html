@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Transfer App</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+
+<body>
+  <label for="fileInput" class="hidden">Hidden Field</label>
+  <input type="file" id="fileInput">
+  <button id="sendFile">Send File</button>
+  <div id="status"></div>
+  <div id="progressContainer">
+    <div id="progressBar">0%</div>
+  </div>
+  <div id="fileDestination"></div>
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const sendFileButton = document.getElementById('sendFile');
+    const statusDiv = document.getElementById('status');
+    const progressBar = document.getElementById('progressBar');
+    const fileDestinationDiv = document.getElementById('fileDestination');
+    let localConnection, remoteConnection, dataChannel;
+
+    // Set up WebSocket for signaling
+    const socket = new WebSocket(`wss://${window.location.host}`);
+
+    socket.onopen = function () {
+      console.log('WebSocket connection established.');
+    };
+
+    socket.onmessage = event => {
+      console.log('Message received:', event.data);
+      const message = JSON.parse(event.data);
+      if (message.offer) {
+        handleOffer(message.offer);
+      } else if (message.answer) {
+        handleAnswer(message.answer);
+      } else if (message.candidate) {
+        handleCandidate(message.candidate);
+      }
+    };
+
+    socket.onerror = function (error) {
+      console.error('WebSocket error:', error);
+    };
+
+    socket.onclose = function (event) {
+      if (event.wasClean) {
+        console.log(`Connection closed cleanly, code=${event.code}, reason=${event.reason}`);
+      } else {
+        console.error(`Connection died, code=${event.code}`);
+      }
+    };
+
+    function createPeerConnection() {
+      localConnection = new RTCPeerConnection();
+      dataChannel = localConnection.createDataChannel('fileTransfer');
+      dataChannel.onopen = () => updateStatus('Data channel open');
+      dataChannel.onclose = () => updateStatus('Data channel closed');
+      dataChannel.onmessage = receiveFile;
+      localConnection.onicecandidate = event => {
+        if (event.candidate) {
+          logCandidateType(event.candidate);
+          socket.send(JSON.stringify({ candidate: event.candidate }));
+        }
+      };
+
+      localConnection.createOffer().then(offer => {
+        localConnection.setLocalDescription(offer);
+        socket.send(JSON.stringify({ offer }));
+      });
+
+      remoteConnection = new RTCPeerConnection();
+      remoteConnection.ondatachannel = event => {
+        const receiveChannel = event.channel;
+        receiveChannel.onmessage = receiveFile;
+      };
+      remoteConnection.onicecandidate = event => {
+        if (event.candidate) {
+          logCandidateType(event.candidate);
+          socket.send(JSON.stringify({ candidate: event.candidate }));
+        }
+      };
+    }
+
+    function handleOffer(offer) {
+      remoteConnection.setRemoteDescription(offer);
+      remoteConnection.createAnswer().then(answer => {
+        remoteConnection.setLocalDescription(answer);
+        socket.send(JSON.stringify({ answer }));
+      });
+    }
+
+    function handleAnswer(answer) {
+      localConnection.setRemoteDescription(answer);
+    }
+
+    function handleCandidate(candidate) {
+      const conn = localConnection || remoteConnection;
+      conn.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+
+    function sendFile() {
+      const file = fileInput.files[0];
+      if (file) {
+        const chunkSize = 16384;
+        const fileReader = new FileReader();
+        let offset = 0;
+
+        fileReader.addEventListener('error', error => console.error('Error reading file:', error));
+        fileReader.addEventListener('abort', event => console.log('File reading aborted:', event));
+        fileReader.addEventListener('load', e => {
+          dataChannel.send(e.target.result);
+          offset += e.target.result.byteLength;
+          updateProgress(offset, file.size);
+          if (offset < file.size) {
+            readSlice(offset);
+          } else {
+            updateStatus('File sent: ' + file.name);
+          }
+        });
+
+        const readSlice = o => {
+          const slice = file.slice(offset, o + chunkSize);
+          fileReader.readAsArrayBuffer(slice);
+        };
+        readSlice(0);
+      }
+    }
+
+    function receiveFile(event) {
+      const arrayBuffer = event.data;
+      const blob = new Blob([arrayBuffer]);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'received_file';
+      link.click();
+      updateStatus('File received');
+      fileDestinationDiv.textContent = 'File saved to: ' + link.download;
+    }
+
+    function updateProgress(offset, fileSize) {
+      const percentage = Math.floor((offset / fileSize) * 100);
+      progressBar.style.width = percentage + '%';
+      progressBar.textContent = percentage + '%';
+    }
+
+    function updateStatus(message) {
+      statusDiv.textContent = message;
+    }
+
+    function logCandidateType(candidate) {
+      if (candidate.candidate) {
+        const candidateType = candidate.candidate.split(' ')[7];
+        console.log(`ICE Candidate Type: ${candidateType}`);
+        if (candidateType === 'relay') {
+          updateStatus('Connection is relayed through TURN server');
+        } else if (candidateType === 'srflx') {
+          updateStatus('Connection is using STUN server');
+        } else if (candidateType === 'host') {
+          updateStatus('Direct P2P connection established');
+        }
+      }
+    }
+
+    createPeerConnection();
+    sendFileButton.onclick = sendFile;
+  </script>
+</body>
+
+</html>
